@@ -1,0 +1,163 @@
+---
+title: "Simulation Challenge"
+subtitle: "Investment Simulation Analysis"
+jupyter: python3
+format:
+  html: default
+execute:
+  echo: false
+  eval: true
+---
+
+## The Investment Game (Brief)
+
+Each year until age 75:
+- Heads: wealth \(\times 1.5\)
+- Tails: wealth \(\times 0.6\)
+
+Initial buy-in: $30,000.
+
+```{python}
+#| include: false
+import math, random
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
+def fmt_dollars(x, pos):
+    ax = abs(x)
+    if ax >= 1_000_000:
+        return f"${x/1_000_000:.1f}M"
+    if ax >= 1_000:
+        return f"${x/1_000:.0f}K"
+    return f"${x:,.0f}"
+
+money_fmt = FuncFormatter(fmt_dollars)
+
+W0 = 30_000
+CURRENT_AGE = 25
+END_AGE = 75
+N = END_AGE - CURRENT_AGE
+
+def sim_path(n, w0, up, down, seed):
+    rng = random.Random(seed)
+    w = w0
+    out = [w]
+    for _ in range(n):
+        w *= up if rng.random() < 0.5 else down
+        out.append(w)
+    return out
+
+def sim_finals(n_sims, n, w0, up, down, seed):
+    rng = random.Random(seed)
+    vals = []
+    for _ in range(n_sims):
+        w = w0
+        for _ in range(n):
+            w *= up if rng.random() < 0.5 else down
+        vals.append(w)
+    return pd.Series(vals)
+```
+
+### 1) Expected Value After 1 Flip
+
+```{python}
+ev_mult = 0.5 * 1.5 + 0.5 * 0.6
+ev_1 = W0 * ev_mult
+ev_gain_pct = (ev_1 / W0 - 1) * 100
+```
+
+Expected value after one flip is **`` `{{python}} f"${ev_1:,.0f}"` ``**, a **`` `{{python}} f"{ev_gain_pct:.1f}%"` ``** gain.  
+Despite positive EV, full-risk compounding creates substantial downside risk.
+
+### 2) Single Simulation Over Time
+
+```{python}
+#| fig-cap: Single simulation path of account balance
+ages = list(range(CURRENT_AGE, END_AGE + 1))
+path = sim_path(N, W0, 1.5, 0.6, seed=42)
+
+fig, ax = plt.subplots(figsize=(8.5, 4.2))
+ax.plot(ages, path, linewidth=2)
+ax.axhline(W0, linestyle="--", linewidth=1.5, color="black", alpha=0.7)
+ax.set_xlim(ages[0], ages[-1])
+ax.set_title("Single simulated path (original game)")
+ax.set_xlabel("Age")
+ax.set_ylabel("Account balance")
+ax.yaxis.set_major_formatter(money_fmt)
+ax.grid(True, alpha=0.25)
+plt.tight_layout()
+```
+
+### 3) 100 Simulations: Distribution of Final Balances
+
+```{python}
+#| fig-cap: Distribution of final balances across 100 simulations
+finals_100 = sim_finals(100, N, W0, 1.5, 0.6, seed=123)
+mean_100 = finals_100.mean()
+median_100 = finals_100.median()
+p_gt_30k_100 = (finals_100 > W0).mean()
+
+fig, ax = plt.subplots(figsize=(8.5, 4.2))
+ax.hist(finals_100, bins=20, edgecolor="white", alpha=0.9)
+ax.axvline(W0, linestyle="--", linewidth=2, color="black", label="$30,000 buy-in")
+ax.set_title("Final balances at age 75 (100 simulations)")
+ax.set_xlabel("Final balance")
+ax.set_ylabel("Count")
+ax.xaxis.set_major_formatter(money_fmt)
+for lbl in ax.get_xticklabels():
+    lbl.set_rotation(45)
+    lbl.set_ha("right")
+ax.grid(True, axis="y", alpha=0.25)
+ax.legend(frameon=False)
+plt.tight_layout()
+```
+
+Mean: **`` `{{python}} f"${mean_100:,.0f}"` ``**; median: **`` `{{python}} f"${median_100:,.0f}"` ``**;  
+\(P(\text{final} > 30k)\): **`` `{{python}} f"{100*p_gt_30k_100:.1f}%"` ``**.
+
+### 4) Probability Balance > $30,000 at Age 75
+
+```{python}
+finals_mc = sim_finals(50_000, N, W0, 1.5, 0.6, seed=999)
+p_gt_30k_mc = (finals_mc > W0).mean()
+```
+
+Monte Carlo estimate: **`` `{{python}} f"{100*p_gt_30k_mc:.1f}%"` ``**.
+
+### 5) Modified Strategy (Bet 25% Each Round)
+
+```{python}
+#| fig-cap: Original vs 25% strategy (side-by-side)
+up_o, down_o = 1.5, 0.6
+up_f, down_f = 1 + 0.5*0.25, 1 - 0.4*0.25
+
+orig = sim_finals(20_000, N, W0, up_o, down_o, seed=2026)
+frac = sim_finals(20_000, N, W0, up_f, down_f, seed=2027)
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.5, 4.4))
+ax1.hist(orig, bins=40, alpha=0.85, color="#1f77b4")
+ax1.axvline(W0, linestyle="--", linewidth=2, color="black")
+ax1.set_title("Original (100% at risk)")
+ax1.set_xlabel("Final balance")
+ax1.set_ylabel("Count")
+ax1.xaxis.set_major_formatter(money_fmt)
+for lbl in ax1.get_xticklabels():
+    lbl.set_rotation(45); lbl.set_ha("right")
+ax1.grid(True, axis="y", alpha=0.25)
+
+ax2.hist(frac, bins=40, alpha=0.85, color="#ff7f0e")
+ax2.axvline(W0, linestyle="--", linewidth=2, color="black")
+ax2.set_title("25% fractional bet")
+ax2.set_xlabel("Final balance")
+ax2.set_ylabel("Count")
+ax2.xaxis.set_major_formatter(money_fmt)
+for lbl in ax2.get_xticklabels():
+    lbl.set_rotation(45); lbl.set_ha("right")
+ax2.grid(True, axis="y", alpha=0.25)
+plt.tight_layout()
+```
+
+### 6) Kelly Criterion
+
+For this game, maximizing expected log growth gives an optimal fraction near \(f^\* = 0.25\), supporting the 25% strategy.
